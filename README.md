@@ -1,5 +1,6 @@
 # Inference with `inference.py`
 The file `inference.py` accepts the path to the directory with two subdirectories ("aligned" and "not_aligned") of images. It then runs the image classification model on all images in the provided paths, makes predictions for them and prints the performance metrics: accuracy and F-score in percent points.
+It also reports the averate latency of predictions.
 For more information, run `python3 inference.py --help`.
 
 # Presentation

@@ -1,5 +1,7 @@
 import argparse
 from pathlib import Path
+import timeit
+import time
 
 from tqdm import tqdm
 
@@ -24,6 +26,7 @@ target_sizes = {
     "convnext": 384
 }
 
+
 def fbeta_score(preds, targets, beta=0.5):
     # Ensure predictions and targets are integers
     preds = preds.int()
@@ -44,6 +47,7 @@ def fbeta_score(preds, targets, beta=0.5):
 
     return fbeta
 
+
 def main(args):
     dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if args.model == "efficientnet":
@@ -63,42 +67,52 @@ def main(args):
 
     base_path = Path(args.data)
     ds = BinaryImageDataset(
-                positive_dir=base_path / "aligned",
-                negative_dir=base_path / "not_aligned",
-                target_size=target_sizes[args.model],
-                preprocess="edges",
-                mask_left=True,
-                transform=transform_test,
-            )
+        positive_dir=base_path / "aligned",
+        negative_dir=base_path / "not_aligned",
+        target_size=target_sizes[args.model],
+        preprocess="edges",
+        mask_left=True,
+        transform=transform_test,
+    )
     dl = DataLoader(ds, batch_size=args.batchsize, num_workers=args.njobs)
 
     dataset_predictions = []
     dataset_targets = []
+    dataset_time = []
     print("Processing data...")
     with torch.no_grad():
         for batch in tqdm(dl):
             x, y = batch
+            start = time.time()
             logits = model(x)
             preds = F.sigmoid(logits).round()
             preds = preds.view(-1)
+            end = time.time()
+            elapsed = end - start
+            dataset_time.append(elapsed)
             y = y.view(-1)
             dataset_predictions.append(preds)
             dataset_targets.append(y)
 
+    dataset_avg_time = sum(dataset_time) / len(dataset_time)
     dataset_targets = torch.cat(dataset_targets, dim=-1)
     dataset_predictions = torch.cat(dataset_predictions, dim=-1)
     acc = accuracy(dataset_predictions, dataset_targets)
     f_beta = fbeta_score(dataset_predictions, dataset_targets, beta=0.5)
     print(f"Accuracy: {acc * 100:.1f}%")
     print(f"F-score: {f_beta * 100:.1f}%")
-
+    print(f"Average prediction time: {round(dataset_avg_time, 5)} s")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--data", type=str, help="Path to dataset")
-    parser.add_argument("--model", type=str, default="efficientnet", choices=["efficientnet", "swin", "convnext"])
-    parser.add_argument("--batchsize", type=int, default=1)
-    parser.add_argument("--njobs", default=4, type=int)
+    parser.add_argument("-s", "--data", type=str,
+                        help="Path to dataset. Must be a directory that contains two subdirectories: 'aligned' and 'not aligned' both of which have to contain JPEGs.")
+    parser.add_argument("--model", type=str, default="efficientnet", choices=["efficientnet", "swin", "convnext"],
+                        help="The model to use. Options are 'efficientnet', 'swin', 'convnext'")
+    parser.add_argument("--batchsize", type=int, default=1,
+                        help="How many examples to send to the model simultaneously. Defaults to 1.")
+    parser.add_argument("--njobs", default=4, type=int,
+                        help="How many processes to use for data uploading. Defaults to 1.")
     args = parser.parse_args()
     main(args)
